@@ -4,26 +4,26 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mailgun/timetools"
+	"github.com/jonboulle/clockwork"
 	. "gopkg.in/check.v1"
 )
 
 func Test(t *testing.T) { TestingT(t) }
 
 type TestSuite struct {
-	timeProvider *timetools.FreezedTime
+	clock clockwork.FakeClock
 }
 
 var _ = Suite(&TestSuite{})
 
 func (s *TestSuite) SetUpTest(c *C) {
 	start := time.Date(2012, 3, 4, 5, 6, 7, 0, time.UTC)
-	s.timeProvider = &timetools.FreezedTime{CurrentTime: start}
+	s.clock = clockwork.NewFakeClockAt(start)
 }
 
-func (s *TestSuite) newMap(capacity int, opts ...TtlMapOption) *TtlMap {
-	opts = append(opts, Clock(s.timeProvider))
-	m, err := NewMap(capacity, opts...)
+func (s *TestSuite) newMap(capacity int, opts ...Option) *TTLMap {
+	opts = append(opts, Clock(s.clock))
+	m, err := New(capacity, opts...)
 	if err != nil {
 		panic(err)
 	}
@@ -31,22 +31,19 @@ func (s *TestSuite) newMap(capacity int, opts ...TtlMapOption) *TtlMap {
 }
 
 func (s *TestSuite) advanceSeconds(seconds int) {
-	s.timeProvider.CurrentTime = s.timeProvider.CurrentTime.Add(time.Second * time.Duration(seconds))
+	s.clock.Advance(time.Second * time.Duration(seconds))
 }
 
 func (s *TestSuite) TestValidation(c *C) {
-	_, err := NewMapWithProvider(-1, s.timeProvider)
+	_, err := New(-1, Clock(s.clock))
 	c.Assert(err, Not(Equals), nil)
 
-	_, err = NewMapWithProvider(0, s.timeProvider)
-	c.Assert(err, Not(Equals), nil)
-
-	_, err = NewMapWithProvider(1, nil)
+	_, err = New(0, Clock(s.clock))
 	c.Assert(err, Not(Equals), nil)
 }
 
 func (s *TestSuite) TestWithRealTime(c *C) {
-	m, err := NewMap(1)
+	m, err := New(1)
 	c.Assert(err, Equals, nil)
 	c.Assert(m, Not(Equals), nil)
 }
@@ -69,7 +66,7 @@ func (s *TestSuite) TestSetWrong(c *C) {
 
 func (s *TestSuite) TestRemoveExpiredEmpty(c *C) {
 	m := s.newMap(1)
-	m.removeExpired(100)
+	m.RemoveExpired(100)
 }
 
 func (s *TestSuite) TestRemoveLastUsedEmpty(c *C) {
@@ -80,7 +77,7 @@ func (s *TestSuite) TestRemoveLastUsedEmpty(c *C) {
 func (s *TestSuite) TestGetSetExpire(c *C) {
 	m := s.newMap(1)
 
-	err := m.Set("a", 1, 1)
+	err := m.Set("a", 1, time.Second)
 	c.Assert(err, Equals, nil)
 
 	valI, exists := m.Get("a")
@@ -96,14 +93,14 @@ func (s *TestSuite) TestGetSetExpire(c *C) {
 func (s *TestSuite) TestSetOverwrite(c *C) {
 	m := s.newMap(1)
 
-	err := m.Set("o", 1, 1)
+	err := m.Set("o", 1, time.Second)
 	c.Assert(err, Equals, nil)
 
 	valI, exists := m.Get("o")
 	c.Assert(exists, Equals, true)
 	c.Assert(valI, Equals, 1)
 
-	err = m.Set("o", 2, 1)
+	err = m.Set("o", 2, time.Second)
 	c.Assert(err, Equals, nil)
 
 	valI, exists = m.Get("o")
@@ -114,12 +111,12 @@ func (s *TestSuite) TestSetOverwrite(c *C) {
 func (s *TestSuite) TestRemoveExpiredEdgeCase(c *C) {
 	m := s.newMap(1)
 
-	err := m.Set("a", 1, 1)
+	err := m.Set("a", 1, time.Second)
 	c.Assert(err, Equals, nil)
 
 	s.advanceSeconds(1)
 
-	err = m.Set("b", 2, 1)
+	err = m.Set("b", 2, time.Second)
 	c.Assert(err, Equals, nil)
 
 	valI, exists := m.Get("a")
@@ -137,15 +134,15 @@ func (s *TestSuite) TestRemoveExpiredEdgeCase(c *C) {
 func (s *TestSuite) TestRemoveOutOfCapacity(c *C) {
 	m := s.newMap(2)
 
-	err := m.Set("a", 1, 5)
+	err := m.Set("a", 1, 5*time.Second)
 	c.Assert(err, Equals, nil)
 
 	s.advanceSeconds(1)
 
-	err = m.Set("b", 2, 6)
+	err = m.Set("b", 2, 6*time.Second)
 	c.Assert(err, Equals, nil)
 
-	err = m.Set("c", 3, 10)
+	err = m.Set("c", 3, 10*time.Second)
 	c.Assert(err, Equals, nil)
 
 	valI, exists := m.Get("a")
@@ -179,19 +176,19 @@ func (s *TestSuite) TestGetIntNotExists(c *C) {
 
 func (s *TestSuite) TestGetInvalidType(c *C) {
 	m := s.newMap(1)
-	m.Set("a", "banana", 5)
+	m.Set("a", "banana", 5*time.Second)
 
 	_, _, err := m.GetInt("a")
-	c.Assert(err, Not(Equals), nil)
+	c.Assert(err, NotNil)
 
-	_, err = m.Increment("a", 4, 1)
-	c.Assert(err, Not(Equals), nil)
+	_, err = m.Increment("a", 4, time.Second)
+	c.Assert(err, NotNil)
 }
 
 func (s *TestSuite) TestIncrementGetExpire(c *C) {
 	m := s.newMap(1)
 
-	m.Increment("a", 5, 1)
+	m.Increment("a", 5, time.Second)
 	val, exists, err := m.GetInt("a")
 
 	c.Assert(err, Equals, nil)
@@ -200,7 +197,7 @@ func (s *TestSuite) TestIncrementGetExpire(c *C) {
 
 	s.advanceSeconds(1)
 
-	m.Increment("a", 4, 1)
+	m.Increment("a", 4, time.Second)
 	val, exists, err = m.GetInt("a")
 
 	c.Assert(err, Equals, nil)
@@ -211,14 +208,14 @@ func (s *TestSuite) TestIncrementGetExpire(c *C) {
 func (s *TestSuite) TestIncrementOverwrite(c *C) {
 	m := s.newMap(1)
 
-	m.Increment("a", 5, 1)
+	m.Increment("a", 5, time.Second)
 	val, exists, err := m.GetInt("a")
 
 	c.Assert(err, Equals, nil)
 	c.Assert(exists, Equals, true)
 	c.Assert(val, Equals, 5)
 
-	m.Increment("a", 4, 1)
+	m.Increment("a", 4, time.Second)
 	val, exists, err = m.GetInt("a")
 
 	c.Assert(err, Equals, nil)
@@ -229,14 +226,14 @@ func (s *TestSuite) TestIncrementOverwrite(c *C) {
 func (s *TestSuite) TestIncrementOutOfCapacity(c *C) {
 	m := s.newMap(1)
 
-	m.Increment("a", 5, 1)
+	m.Increment("a", 5, time.Second)
 	val, exists, err := m.GetInt("a")
 
 	c.Assert(err, Equals, nil)
 	c.Assert(exists, Equals, true)
 	c.Assert(val, Equals, 5)
 
-	m.Increment("b", 4, 1)
+	m.Increment("b", 4, time.Second)
 	val, exists, err = m.GetInt("b")
 
 	c.Assert(err, Equals, nil)
@@ -252,12 +249,11 @@ func (s *TestSuite) TestIncrementOutOfCapacity(c *C) {
 func (s *TestSuite) TestIncrementRemovesExpired(c *C) {
 	m := s.newMap(2)
 
-	m.Increment("a", 1, 1)
-	m.Increment("b", 2, 2)
+	m.Increment("a", 1, 1*time.Second)
+	m.Increment("b", 2, 2*time.Second)
 
 	s.advanceSeconds(1)
-	m.Increment("c", 3, 3)
-
+	m.Increment("c", 3, 3*time.Second)
 	val, exists, err := m.GetInt("a")
 
 	c.Assert(err, Equals, nil)
@@ -277,9 +273,9 @@ func (s *TestSuite) TestIncrementRemovesExpired(c *C) {
 func (s *TestSuite) TestIncrementRemovesLastUsed(c *C) {
 	m := s.newMap(2)
 
-	m.Increment("a", 1, 10)
-	m.Increment("b", 2, 11)
-	m.Increment("c", 3, 12)
+	m.Increment("a", 1, 10*time.Second)
+	m.Increment("b", 2, 11*time.Second)
+	m.Increment("c", 3, 12*time.Second)
 
 	val, exists, err := m.GetInt("a")
 
@@ -301,8 +297,8 @@ func (s *TestSuite) TestIncrementRemovesLastUsed(c *C) {
 func (s *TestSuite) TestIncrementUpdatesTtl(c *C) {
 	m := s.newMap(1)
 
-	m.Increment("a", 1, 1)
-	m.Increment("a", 1, 10)
+	m.Increment("a", 1, 1*time.Second)
+	m.Increment("a", 1, 10*time.Second)
 
 	s.advanceSeconds(1)
 
@@ -315,8 +311,8 @@ func (s *TestSuite) TestIncrementUpdatesTtl(c *C) {
 func (s *TestSuite) TestUpdate(c *C) {
 	m := s.newMap(1)
 
-	m.Increment("a", 1, 1)
-	m.Increment("a", 1, 10)
+	m.Increment("a", 1, 1*time.Second)
+	m.Increment("a", 1, 10*time.Second)
 
 	s.advanceSeconds(1)
 
@@ -336,7 +332,7 @@ func (s *TestSuite) TestCallOnExpire(c *C) {
 		val = el
 	}))
 
-	err := m.Set("a", 1, 1)
+	err := m.Set("a", 1, 1*time.Second)
 	c.Assert(err, Equals, nil)
 
 	valI, exists := m.Get("a")
@@ -348,6 +344,31 @@ func (s *TestSuite) TestCallOnExpire(c *C) {
 	_, exists = m.Get("a")
 	c.Assert(exists, Equals, false)
 	c.Assert(called, Equals, true)
+	c.Assert(key, Equals, "a")
+	c.Assert(val, Equals, 1)
+}
+
+func (s *TestSuite) TestCallOnExpireCall(c *C) {
+	var called bool
+	var key string
+	var val interface{}
+	m := s.newMap(1, CallOnExpire(func(k string, el interface{}) {
+		called = true
+		key = k
+		val = el
+	}))
+
+	err := m.Set("a", 1, 1*time.Second)
+	c.Assert(err, Equals, nil)
+
+	valI, exists := m.Get("a")
+	c.Assert(exists, Equals, true)
+	c.Assert(valI, Equals, 1)
+
+	s.advanceSeconds(1)
+
+	m.RemoveExpired(10)
+
 	c.Assert(key, Equals, "a")
 	c.Assert(val, Equals, 1)
 }
