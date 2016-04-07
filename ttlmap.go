@@ -72,6 +72,19 @@ func New(capacity int, opts ...Option) (*TTLMap, error) {
 	return m, nil
 }
 
+// Remove removes and returns element if it's found,
+// returns element, true if it's found
+// returns nil, false if element is not found
+func (m *TTLMap) Remove(key string) (interface{}, bool) {
+	mapEl, exists := m.elements[key]
+	if !exists {
+		return nil, false
+	}
+	delete(m.elements, mapEl.key)
+	m.expiryTimes.RemoveEl(mapEl.heapEl)
+	return mapEl.value, true
+}
+
 // Set sets the value of the element by key to value and sets time to expire
 // to TTL. Resolution is 1 second, min value is one second
 func (m *TTLMap) Set(key string, value interface{}, ttl time.Duration) error {

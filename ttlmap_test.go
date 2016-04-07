@@ -372,3 +372,31 @@ func (s *TestSuite) TestCallOnExpireCall(c *C) {
 	c.Assert(key, Equals, "a")
 	c.Assert(val, Equals, 1)
 }
+
+func (s *TestSuite) TestRemove(c *C) {
+	m := s.newMap(3)
+
+	m.Set("a", "el1", 1*time.Second)
+	m.Set("b", "el2", 5*time.Second)
+	m.Set("c", "el3", 7*time.Second)
+
+	el, ok := m.Remove("b")
+	c.Assert(ok, Equals, true)
+	c.Assert(el.(string), Equals, "el2")
+
+	_, ok = m.Remove("b")
+	c.Assert(ok, Equals, false)
+
+	s.advanceSeconds(1)
+
+	_, ok = m.Get("a")
+	c.Assert(ok, Equals, false)
+
+	_, ok = m.Get("c")
+	c.Assert(ok, Equals, true)
+
+	s.advanceSeconds(8)
+
+	_, ok = m.Get("c")
+	c.Assert(ok, Equals, false)
+}
