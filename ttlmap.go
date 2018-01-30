@@ -72,6 +72,17 @@ func New(capacity int, opts ...Option) (*TTLMap, error) {
 	return m, nil
 }
 
+// Keys returns a slice of non-expired map keys
+func (m *TTLMap) Keys() []string {
+	var keys []string
+	for k := range m.elements {
+		if _, exists := m.Get(k); exists {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
 // Pop removes and returns the key and the value of the oldest element
 // from the TTL Map if there are no elements in the map, returns empty
 // string and false

@@ -426,3 +426,19 @@ func (s *TestSuite) TestPop(c *C) {
 	_, _, exists = m.Pop()
 	c.Assert(exists, Equals, false)
 }
+
+func (s *TestSuite) TestKeys(c *C) {
+	m := s.newMap(100)
+
+	c.Assert(len(m.Keys()), Equals, 0)
+
+	c.Assert(m.Set("a", "aval", 4*time.Second), IsNil)
+	c.Assert(m.Keys(), DeepEquals, []string{"a"})
+
+	c.Assert(m.Set("b", "bval", 1*time.Second), IsNil)
+	c.Assert(m.Keys(), DeepEquals, []string{"a", "b"})
+
+	s.advanceSeconds(2)
+
+	c.Assert(m.Keys(), DeepEquals, []string{"a"})
+}
