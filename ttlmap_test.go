@@ -1,3 +1,18 @@
+/*
+Copyright 2017 Mailgun Technologies Inc
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 package ttlmap
 
 import (
@@ -5,424 +20,326 @@ import (
 	"time"
 
 	"github.com/jonboulle/clockwork"
-	. "gopkg.in/check.v1"
+	"github.com/stretchr/testify/suite"
 )
 
-func Test(t *testing.T) { TestingT(t) }
-
-type TestSuite struct {
-	clock clockwork.FakeClock
+type TTLMapSuite struct {
+	suite.Suite
+	clock clockwork.Clock
 }
 
-var _ = Suite(&TestSuite{})
-
-func (s *TestSuite) SetUpTest(c *C) {
-	start := time.Date(2012, 3, 4, 5, 6, 7, 0, time.UTC)
-	s.clock = clockwork.NewFakeClockAt(start)
+func TestTTLMapSuite(t *testing.T) {
+	suite.Run(t, new(TTLMapSuite))
 }
 
-func (s *TestSuite) newMap(capacity int, opts ...Option) *TTLMap {
-	opts = append(opts, Clock(s.clock))
-	m, err := New(capacity, opts...)
-	if err != nil {
-		panic(err)
-	}
-	return m
-}
-
-func (s *TestSuite) advanceSeconds(seconds int) {
-	s.clock.Advance(time.Second * time.Duration(seconds))
-}
-
-func (s *TestSuite) TestValidation(c *C) {
-	_, err := New(-1, Clock(s.clock))
-	c.Assert(err, Not(Equals), nil)
-
-	_, err = New(0, Clock(s.clock))
-	c.Assert(err, Not(Equals), nil)
-}
-
-func (s *TestSuite) TestWithRealTime(c *C) {
-	m, err := New(1)
-	c.Assert(err, Equals, nil)
-	c.Assert(m, Not(Equals), nil)
-}
-
-func (s *TestSuite) TestSetWrong(c *C) {
-	m := s.newMap(1)
+func (s *TTLMapSuite) TestSetWrong() {
+	m := NewTTLMap(1)
 
 	err := m.Set("a", 1, -1)
-	c.Assert(err, Not(Equals), nil)
+	s.Require().EqualError(err, "ttlSeconds should be >= 0, got -1")
 
 	err = m.Set("a", 1, 0)
-	c.Assert(err, Not(Equals), nil)
+	s.Require().EqualError(err, "ttlSeconds should be >= 0, got 0")
 
 	_, err = m.Increment("a", 1, 0)
-	c.Assert(err, Not(Equals), nil)
+	s.Require().EqualError(err, "ttlSeconds should be >= 0, got 0")
 
 	_, err = m.Increment("a", 1, -1)
-	c.Assert(err, Not(Equals), nil)
+	s.Require().EqualError(err, "ttlSeconds should be >= 0, got -1")
 }
 
-func (s *TestSuite) TestRemoveExpiredEmpty(c *C) {
-	m := s.newMap(1)
+func (s *TTLMapSuite) TestRemoveExpiredEmpty() {
+	m := NewTTLMap(1)
 	m.RemoveExpired(100)
 }
 
-func (s *TestSuite) TestRemoveLastUsedEmpty(c *C) {
-	m := s.newMap(1)
-	m.removeLastUsed(100)
+func (s *TTLMapSuite) TestRemoveLastUsedEmpty() {
+	m := NewTTLMap(1)
+	m.RemoveLastUsed(100)
 }
 
-func (s *TestSuite) TestGetSetExpire(c *C) {
-	m := s.newMap(1)
+func (s *TTLMapSuite) TestGetSetExpire() {
+	clock := clockwork.NewFakeClock()
+	m := newTTLMap(1, clock)
 
-	err := m.Set("a", 1, time.Second)
-	c.Assert(err, Equals, nil)
+	err := m.Set("a", 1, 1)
+	s.Require().Equal(nil, err)
 
 	valI, exists := m.Get("a")
-	c.Assert(exists, Equals, true)
-	c.Assert(valI, Equals, 1)
+	s.Require().Equal(true, exists)
+	s.Require().Equal(1, valI)
 
-	s.advanceSeconds(1)
+	clock.Advance(1 * time.Second)
 
 	_, exists = m.Get("a")
-	c.Assert(exists, Equals, false)
+	s.Require().Equal(false, exists)
 }
 
-func (s *TestSuite) TestSetOverwrite(c *C) {
-	m := s.newMap(1)
+func (s *TTLMapSuite) TestSetOverwrite() {
+	m := NewTTLMap(1)
 
-	err := m.Set("o", 1, time.Second)
-	c.Assert(err, Equals, nil)
+	err := m.Set("o", 1, 1)
+	s.Require().Equal(nil, err)
 
 	valI, exists := m.Get("o")
-	c.Assert(exists, Equals, true)
-	c.Assert(valI, Equals, 1)
+	s.Require().Equal(true, exists)
+	s.Require().Equal(1, valI)
 
-	err = m.Set("o", 2, time.Second)
-	c.Assert(err, Equals, nil)
+	err = m.Set("o", 2, 1)
+	s.Require().Equal(nil, err)
 
 	valI, exists = m.Get("o")
-	c.Assert(exists, Equals, true)
-	c.Assert(valI, Equals, 2)
+	s.Require().Equal(true, exists)
+	s.Require().Equal(2, valI)
 }
 
-func (s *TestSuite) TestRemoveExpiredEdgeCase(c *C) {
-	m := s.newMap(1)
+func (s *TTLMapSuite) TestRemoveExpiredEdgeCase() {
+	clock := clockwork.NewFakeClock()
+	m := newTTLMap(1, clock)
 
-	err := m.Set("a", 1, time.Second)
-	c.Assert(err, Equals, nil)
+	err := m.Set("a", 1, 1)
+	s.Require().Equal(nil, err)
 
-	s.advanceSeconds(1)
+	clock.Advance(1 * time.Second)
 
-	err = m.Set("b", 2, time.Second)
-	c.Assert(err, Equals, nil)
+	err = m.Set("b", 2, 1)
+	s.Require().Equal(nil, err)
 
 	valI, exists := m.Get("a")
-	c.Assert(exists, Equals, false)
+	s.Require().Equal(false, exists)
 
 	valI, exists = m.Get("b")
-	c.Assert(exists, Equals, true)
-	c.Assert(valI, Equals, 2)
+	s.Require().Equal(true, exists)
+	s.Require().Equal(2, valI)
 
-	c.Assert(len(m.elements), Equals, 1)
-	c.Assert(m.expiryTimes.Len(), Equals, 1)
-	c.Assert(m.Len(), Equals, 1)
+	s.Require().Equal(1, m.Len())
 }
 
-func (s *TestSuite) TestRemoveOutOfCapacity(c *C) {
-	m := s.newMap(2)
+func (s *TTLMapSuite) TestRemoveOutOfCapacity() {
+	clock := clockwork.NewFakeClock()
+	m := newTTLMap(2, clock)
 
-	err := m.Set("a", 1, 5*time.Second)
-	c.Assert(err, Equals, nil)
+	err := m.Set("a", 1, 5)
+	s.Require().Equal(nil, err)
 
-	s.advanceSeconds(1)
+	clock.Advance(1 * time.Second)
 
-	err = m.Set("b", 2, 6*time.Second)
-	c.Assert(err, Equals, nil)
+	err = m.Set("b", 2, 6)
+	s.Require().Equal(nil, err)
 
-	err = m.Set("c", 3, 10*time.Second)
-	c.Assert(err, Equals, nil)
+	err = m.Set("c", 3, 10)
+	s.Require().Equal(nil, err)
 
 	valI, exists := m.Get("a")
-	c.Assert(exists, Equals, false)
+	s.Require().Equal(false, exists)
 
 	valI, exists = m.Get("b")
-	c.Assert(exists, Equals, true)
-	c.Assert(valI, Equals, 2)
+	s.Require().Equal(true, exists)
+	s.Require().Equal(2, valI)
 
 	valI, exists = m.Get("c")
-	c.Assert(exists, Equals, true)
-	c.Assert(valI, Equals, 3)
+	s.Require().Equal(true, exists)
+	s.Require().Equal(3, valI)
 
-	c.Assert(len(m.elements), Equals, 2)
-	c.Assert(m.expiryTimes.Len(), Equals, 2)
-	c.Assert(m.Len(), Equals, 2)
+	s.Require().Equal(2, m.Len())
 }
 
-func (s *TestSuite) TestGetNotExists(c *C) {
-	m := s.newMap(1)
+func (s *TTLMapSuite) TestGetNotExists() {
+	m := NewTTLMap(1)
 	_, exists := m.Get("a")
-	c.Assert(exists, Equals, false)
+	s.Require().Equal(false, exists)
 }
 
-func (s *TestSuite) TestGetIntNotExists(c *C) {
-	m := s.newMap(1)
+func (s *TTLMapSuite) TestGetIntNotExists() {
+	m := NewTTLMap(1)
 	_, exists, err := m.GetInt("a")
-	c.Assert(err, Equals, nil)
-	c.Assert(exists, Equals, false)
+	s.Require().Equal(nil, err)
+	s.Require().Equal(false, exists)
 }
 
-func (s *TestSuite) TestGetInvalidType(c *C) {
-	m := s.newMap(1)
-	m.Set("a", "banana", 5*time.Second)
+func (s *TTLMapSuite) TestGetInvalidType() {
+	m := NewTTLMap(1)
+	m.Set("a", "banana", 5)
 
 	_, _, err := m.GetInt("a")
-	c.Assert(err, NotNil)
+	s.Require().EqualError(err, "Expected existing value to be integer, got string")
 
-	_, err = m.Increment("a", 4, time.Second)
-	c.Assert(err, NotNil)
+	_, err = m.Increment("a", 4, 1)
+	s.Require().EqualError(err, "Expected existing value to be integer, got string")
 }
 
-func (s *TestSuite) TestIncrementGetExpire(c *C) {
-	m := s.newMap(1)
+func (s *TTLMapSuite) TestIncrementGetExpire() {
+	clock := clockwork.NewFakeClock()
+	m := newTTLMap(1, clock)
 
-	m.Increment("a", 5, time.Second)
+	m.Increment("a", 5, 1)
 	val, exists, err := m.GetInt("a")
 
-	c.Assert(err, Equals, nil)
-	c.Assert(exists, Equals, true)
-	c.Assert(val, Equals, 5)
+	s.Require().Equal(nil, err)
+	s.Require().Equal(true, exists)
+	s.Require().Equal(5, val)
 
-	s.advanceSeconds(1)
+	clock.Advance(1 * time.Second)
 
-	m.Increment("a", 4, time.Second)
+	m.Increment("a", 4, 1)
 	val, exists, err = m.GetInt("a")
 
-	c.Assert(err, Equals, nil)
-	c.Assert(exists, Equals, true)
-	c.Assert(val, Equals, 4)
+	s.Require().Equal(nil, err)
+	s.Require().Equal(true, exists)
+	s.Require().Equal(4, val)
 }
 
-func (s *TestSuite) TestIncrementOverwrite(c *C) {
-	m := s.newMap(1)
+func (s *TTLMapSuite) TestIncrementOverwrite() {
+	m := NewTTLMap(1)
 
-	m.Increment("a", 5, time.Second)
+	m.Increment("a", 5, 1)
 	val, exists, err := m.GetInt("a")
 
-	c.Assert(err, Equals, nil)
-	c.Assert(exists, Equals, true)
-	c.Assert(val, Equals, 5)
+	s.Require().Equal(nil, err)
+	s.Require().Equal(true, exists)
+	s.Require().Equal(5, val)
 
-	m.Increment("a", 4, time.Second)
+	m.Increment("a", 4, 1)
 	val, exists, err = m.GetInt("a")
 
-	c.Assert(err, Equals, nil)
-	c.Assert(exists, Equals, true)
-	c.Assert(val, Equals, 9)
+	s.Require().Equal(nil, err)
+	s.Require().Equal(true, exists)
+	s.Require().Equal(9, val)
 }
 
-func (s *TestSuite) TestIncrementOutOfCapacity(c *C) {
-	m := s.newMap(1)
+func (s *TTLMapSuite) TestIncrementOutOfCapacity() {
+	m := NewTTLMap(1)
 
-	m.Increment("a", 5, time.Second)
+	m.Increment("a", 5, 1)
 	val, exists, err := m.GetInt("a")
 
-	c.Assert(err, Equals, nil)
-	c.Assert(exists, Equals, true)
-	c.Assert(val, Equals, 5)
+	s.Require().Equal(nil, err)
+	s.Require().Equal(true, exists)
+	s.Require().Equal(5, val)
 
-	m.Increment("b", 4, time.Second)
+	m.Increment("b", 4, 1)
 	val, exists, err = m.GetInt("b")
 
-	c.Assert(err, Equals, nil)
-	c.Assert(exists, Equals, true)
-	c.Assert(val, Equals, 4)
+	s.Require().Equal(nil, err)
+	s.Require().Equal(true, exists)
+	s.Require().Equal(4, val)
 
 	val, exists, err = m.GetInt("a")
 
-	c.Assert(err, Equals, nil)
-	c.Assert(exists, Equals, false)
+	s.Require().Equal(nil, err)
+	s.Require().Equal(false, exists)
 }
 
-func (s *TestSuite) TestIncrementRemovesExpired(c *C) {
-	m := s.newMap(2)
+func (s *TTLMapSuite) TestIncrementRemovesExpired() {
+	clock := clockwork.NewFakeClock()
+	m := newTTLMap(2, clock)
 
-	m.Increment("a", 1, 1*time.Second)
-	m.Increment("b", 2, 2*time.Second)
+	m.Increment("a", 1, 1)
+	m.Increment("b", 2, 2)
 
-	s.advanceSeconds(1)
-	m.Increment("c", 3, 3*time.Second)
+	clock.Advance(1 * time.Second)
+	m.Increment("c", 3, 3)
+
 	val, exists, err := m.GetInt("a")
 
-	c.Assert(err, Equals, nil)
-	c.Assert(exists, Equals, false)
+	s.Require().Equal(nil, err)
+	s.Require().Equal(false, exists)
 
 	val, exists, err = m.GetInt("b")
-	c.Assert(err, Equals, nil)
-	c.Assert(exists, Equals, true)
-	c.Assert(val, Equals, 2)
+	s.Require().Equal(nil, err)
+	s.Require().Equal(true, exists)
+	s.Require().Equal(2, val)
 
 	val, exists, err = m.GetInt("c")
-	c.Assert(err, Equals, nil)
-	c.Assert(exists, Equals, true)
-	c.Assert(val, Equals, 3)
+	s.Require().Equal(nil, err)
+	s.Require().Equal(true, exists)
+	s.Require().Equal(3, val)
 }
 
-func (s *TestSuite) TestIncrementRemovesLastUsed(c *C) {
-	m := s.newMap(2)
+func (s *TTLMapSuite) TestIncrementRemovesLastUsed() {
+	m := NewTTLMap(2)
 
-	m.Increment("a", 1, 10*time.Second)
-	m.Increment("b", 2, 11*time.Second)
-	m.Increment("c", 3, 12*time.Second)
+	m.Increment("a", 1, 10)
+	m.Increment("b", 2, 11)
+	m.Increment("c", 3, 12)
 
 	val, exists, err := m.GetInt("a")
 
-	c.Assert(err, Equals, nil)
-	c.Assert(exists, Equals, false)
+	s.Require().Equal(nil, err)
+	s.Require().Equal(false, exists)
 
 	val, exists, err = m.GetInt("b")
-	c.Assert(err, Equals, nil)
-	c.Assert(exists, Equals, true)
+	s.Require().Equal(nil, err)
+	s.Require().Equal(true, exists)
 
-	c.Assert(val, Equals, 2)
+	s.Require().Equal(2, val)
 
 	val, exists, err = m.GetInt("c")
-	c.Assert(err, Equals, nil)
-	c.Assert(exists, Equals, true)
-	c.Assert(val, Equals, 3)
+	s.Require().Equal(nil, err)
+	s.Require().Equal(true, exists)
+	s.Require().Equal(3, val)
 }
 
-func (s *TestSuite) TestIncrementUpdatesTtl(c *C) {
-	m := s.newMap(1)
+func (s *TTLMapSuite) TestIncrementUpdatesTtl() {
+	clock := clockwork.NewFakeClock()
+	m := newTTLMap(1, clock)
 
-	m.Increment("a", 1, 1*time.Second)
-	m.Increment("a", 1, 10*time.Second)
+	m.Increment("a", 1, 1)
+	m.Increment("a", 1, 10)
 
-	s.advanceSeconds(1)
+	clock.Advance(1 * time.Second)
 
 	val, exists, err := m.GetInt("a")
-	c.Assert(err, Equals, nil)
-	c.Assert(exists, Equals, true)
-	c.Assert(val, Equals, 2)
+	s.Require().Equal(nil, err)
+	s.Require().Equal(true, exists)
+	s.Require().Equal(2, val)
 }
 
-func (s *TestSuite) TestUpdate(c *C) {
-	m := s.newMap(1)
+func (s *TTLMapSuite) TestUpdate() {
+	clock := clockwork.NewFakeClock()
+	m := newTTLMap(1, clock)
 
-	m.Increment("a", 1, 1*time.Second)
-	m.Increment("a", 1, 10*time.Second)
+	m.Increment("a", 1, 1)
+	m.Increment("a", 1, 10)
 
-	s.advanceSeconds(1)
+	clock.Advance(1 * time.Second)
 
 	val, exists, err := m.GetInt("a")
-	c.Assert(err, Equals, nil)
-	c.Assert(exists, Equals, true)
-	c.Assert(val, Equals, 2)
+	s.Require().Equal(nil, err)
+	s.Require().Equal(true, exists)
+	s.Require().Equal(2, val)
 }
 
-func (s *TestSuite) TestCallOnExpire(c *C) {
+func (s *TTLMapSuite) TestCallOnExpire() {
 	var called bool
 	var key string
 	var val interface{}
-	m := s.newMap(1, CallOnExpire(func(k string, el interface{}) {
+	clock := clockwork.NewFakeClock()
+	m := newTTLMap(1, clock)
+	m.OnExpire = func(k string, el interface{}) {
 		called = true
 		key = k
 		val = el
-	}))
+	}
 
-	err := m.Set("a", 1, 1*time.Second)
-	c.Assert(err, Equals, nil)
+	err := m.Set("a", 1, 1)
+	s.Require().Equal(nil, err)
 
 	valI, exists := m.Get("a")
-	c.Assert(exists, Equals, true)
-	c.Assert(valI, Equals, 1)
+	s.Require().Equal(true, exists)
+	s.Require().Equal(1, valI)
 
-	s.advanceSeconds(1)
+	clock.Advance(1 * time.Second)
 
 	_, exists = m.Get("a")
-	c.Assert(exists, Equals, false)
-	c.Assert(called, Equals, true)
-	c.Assert(key, Equals, "a")
-	c.Assert(val, Equals, 1)
+	s.Require().Equal(false, exists)
+	s.Require().Equal(true, called)
+	s.Require().Equal("a", key)
+	s.Require().Equal(1, val)
 }
 
-func (s *TestSuite) TestCallOnExpireCall(c *C) {
-	var called bool
-	var key string
-	var val interface{}
-	m := s.newMap(1, CallOnExpire(func(k string, el interface{}) {
-		called = true
-		key = k
-		val = el
-	}))
-
-	err := m.Set("a", 1, 1*time.Second)
-	c.Assert(err, Equals, nil)
-
-	valI, exists := m.Get("a")
-	c.Assert(exists, Equals, true)
-	c.Assert(valI, Equals, 1)
-
-	s.advanceSeconds(1)
-
-	m.RemoveExpired(10)
-
-	c.Assert(key, Equals, "a")
-	c.Assert(val, Equals, 1)
-}
-
-func (s *TestSuite) TestRemove(c *C) {
-	m := s.newMap(3)
-
-	m.Set("a", "el1", 1*time.Second)
-	m.Set("b", "el2", 5*time.Second)
-	m.Set("c", "el3", 7*time.Second)
-
-	el, ok := m.Remove("b")
-	c.Assert(ok, Equals, true)
-	c.Assert(el.(string), Equals, "el2")
-
-	_, ok = m.Remove("b")
-	c.Assert(ok, Equals, false)
-
-	s.advanceSeconds(1)
-
-	_, ok = m.Get("a")
-	c.Assert(ok, Equals, false)
-
-	_, ok = m.Get("c")
-	c.Assert(ok, Equals, true)
-
-	s.advanceSeconds(8)
-
-	_, ok = m.Get("c")
-	c.Assert(ok, Equals, false)
-}
-
-func (s *TestSuite) TestPop(c *C) {
-	m := s.newMap(100)
-
-	_, _, exists := m.Pop()
-	c.Assert(exists, Equals, false)
-
-	err := m.Set("a", "aval", 2*time.Second)
-	c.Assert(err, Equals, nil)
-
-	err = m.Set("b", "bval", time.Second)
-	c.Assert(err, Equals, nil)
-
-	key, val, exists := m.Pop()
-	c.Assert(exists, Equals, true)
-	c.Assert(key, Equals, "b")
-	c.Assert(val, Equals, "bval")
-
-	key, val, exists = m.Pop()
-	c.Assert(exists, Equals, true)
-	c.Assert(key, Equals, "a")
-	c.Assert(val, Equals, "aval")
-
-	_, _, exists = m.Pop()
-	c.Assert(exists, Equals, false)
+func newTTLMap(ttlSeconds int, clock clockwork.FakeClock) *TTLMap {
+	m := NewTTLMap(ttlSeconds)
+	m.clock = clock
+	return m
 }
